@@ -1,9 +1,0 @@
-﻿  SceneSelect.cpp
-  コード生成しています。
-  Previous IPDB and IOBJ mismatch, fall back to full compilation.
-C:\ClassFile\GG31\MyShaderProject\ShaderProject\SceneSelect.cpp(42): warning C4172: ローカル変数またはテンポラリのアドレスを返します: pData
-C:\ClassFile\GG31\MyShaderProject\ShaderProject\Timer.cpp(71): warning C4715: 'CTimer::checkName': 値を返さないコントロール パスがあります。
-C:\ClassFile\GG31\MyShaderProject\ShaderProject\SceneTitle.cpp(174): warning C4172: ローカル変数またはテンポラリのアドレスを返します: pUI
-  All 2725 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
-  コード生成が終了しました。
-  ShaderProject.vcxproj -> C:\ClassFile\GG31\MyShaderProject\x64\Release\ShaderProject.exe
