@@ -1,0 +1,283 @@
+#include "Geometory.h"
+#include "MeshBuffer.h"
+#include "ConstantBuffer.h"
+#include "Shader.h"
+#include <DirectXMath.h>
+#include <memory>
+
+using namespace DirectX;
+
+//--- 定数
+const int GeometoryLineNum = 1000;
+const int GeometoryLineVtxNum = GeometoryLineNum * 2;
+#define SCREEN_WIDTH	(1280)				// ウインドウの幅
+#define SCREEN_HEIGHT	(720)				// ウインドウの高さ
+
+//--- 構造体
+struct GeometoryVertex
+{
+	DirectX::XMFLOAT3 pos;
+	DirectX::XMFLOAT4 color;
+};
+
+struct TriangleVertex
+{
+	float x, y, z;		// 頂点座標
+};
+
+//--- グローバル変数
+UINT g_geometoryLineIndex;
+GeometoryVertex g_geometoryLineVtx[GeometoryLineVtxNum];
+std::shared_ptr<MeshBuffer> g_pGeometoryLinesMesh;
+std::shared_ptr<MeshBuffer> g_pGeometoryBoxMesh;
+std::shared_ptr<MeshBuffer> g_pGeometoryPolygonMesh;
+std::shared_ptr<VertexShader> g_pGeometoryVS;
+std::shared_ptr<VertexShader> g_pPolygonVS;
+std::shared_ptr<PixelShader> g_pGeometoryPS;
+std::shared_ptr<ConstantBuffer> m_pGeometoryWVP;
+std::shared_ptr<ConstantBuffer> m_pGeometoryColor;
+XMFLOAT4X4 g_geometoryWVPMat[3];
+XMFLOAT4 g_geometoryColor;
+XMFLOAT4X4 g_mView;
+XMFLOAT4X4 g_mProj;
+
+
+void InitGeometory()
+{
+	// 直線
+	MeshBuffer::Description lineDesc = {};
+	lineDesc.pVtx = g_geometoryLineVtx;
+	lineDesc.vtxSize = sizeof(GeometoryVertex);
+	lineDesc.vtxCount = GeometoryLineVtxNum;
+	lineDesc.isWrite = true;
+	lineDesc.topology = D3D11_PRIMITIVE_TOPOLOGY_LINELIST;
+	g_geometoryLineIndex = 0;
+	g_pGeometoryLinesMesh = std::make_shared<MeshBuffer>(lineDesc);
+
+	// ボックス
+	const float d = 0.5f;
+	DirectX::XMFLOAT4 boxColor(1.0f, 1.0f, 1.0f, 1.0f);
+	GeometoryVertex boxVtx[] = {
+		{DirectX::XMFLOAT3(-d, d,-d), boxColor},
+		{DirectX::XMFLOAT3(d, d,-d), boxColor},
+		{DirectX::XMFLOAT3(-d,-d,-d), boxColor},
+		{DirectX::XMFLOAT3(d,-d,-d), boxColor},
+		{DirectX::XMFLOAT3(-d, d, d), boxColor},
+		{DirectX::XMFLOAT3(d, d, d), boxColor},
+		{DirectX::XMFLOAT3(-d,-d, d), boxColor},
+		{DirectX::XMFLOAT3(d,-d, d), boxColor},
+	};
+	BYTE boxIdx[] = {
+		0,1,2, 2,1,3,
+		1,5,3, 3,5,7,
+		5,4,7, 7,4,6,
+		4,0,6, 6,0,2,
+		4,5,0, 0,5,1,
+		2,3,6, 6,3,7
+	};
+	MeshBuffer::Description boxDesc = {};
+	boxDesc.pVtx = boxVtx;
+	boxDesc.vtxSize = sizeof(GeometoryVertex);
+	boxDesc.vtxCount = _countof(boxVtx);
+	boxDesc.pIdx = boxIdx;
+	boxDesc.idxSize = sizeof(boxIdx[0]);
+	boxDesc.idxCount = _countof(boxIdx);
+	boxDesc.topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	g_pGeometoryBoxMesh = std::make_shared<MeshBuffer>(boxDesc);
+
+	TriangleVertex vertices[] = {
+	{ -1.0f, 1.0f, 0.0f },
+	{ 1.0f, 1.0f, 0.0f },
+	{ 1.0f, -1.0f, 0.0f },
+	{ -1.0f, -1.0f, 0.0f },
+	};
+
+	BYTE polygonIdx[] = {
+		0,1,2, 0,2,3
+	};
+
+	MeshBuffer::Description polygonDesc = {};
+	polygonDesc.pVtx = vertices;
+	polygonDesc.vtxSize = sizeof(TriangleVertex);
+	polygonDesc.vtxCount = _countof(vertices);
+	polygonDesc.pIdx = polygonIdx;
+	polygonDesc.idxSize = sizeof(polygonIdx[0]);
+	polygonDesc.idxCount = _countof(polygonIdx);
+	polygonDesc.topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	g_pGeometoryPolygonMesh = std::make_shared<MeshBuffer>(polygonDesc);
+
+
+	// 頂点シェーダー
+	g_pGeometoryVS = std::make_shared<VertexShader>();
+	g_pGeometoryVS->Compile(R"EOT(
+struct VS_IN {
+	float3 pos : POSITION0;
+	float4 color : COLOR0;
+};
+struct VS_OUT {
+	float4 pos : SV_POSITION;
+	float4 color : COLOR0;
+};
+cbuffer WVP : register(b0) {
+	float4x4 world;
+	float4x4 view;
+	float4x4 proj;
+};
+cbuffer Color : register(b1) {
+	float4 color;
+};
+VS_OUT main(VS_IN vin) {
+	VS_OUT vout;
+	vout.pos = float4(vin.pos, 1.0f);
+	vout.pos = mul(vout.pos, world);
+	vout.pos = mul(vout.pos, view);
+	vout.pos = mul(vout.pos, proj);
+	vout.color = vin.color * color;
+	return vout;
+}
+)EOT");
+
+	// 頂点シェーダー(ポリゴン)
+	g_pPolygonVS = std::make_shared<VertexShader>();
+	g_pPolygonVS->Compile(R"EOT(
+struct VS_IN {
+	float3 pos : POSITION0;
+	float4 color : COLOR0;
+};
+struct VS_OUT {
+	float4 pos : SV_POSITION;
+	float4 color : COLOR0;
+};
+cbuffer WVP : register(b0) {
+	float4x4 world;
+	float4x4 view;
+	float4x4 proj;
+};
+cbuffer Color : register(b1) {
+	float4 color;
+};
+VS_OUT main(VS_IN vin) {
+	VS_OUT vout;
+	vout.pos = float4(vin.pos, 1.0f);
+	vout.pos = mul(vout.pos, world);
+	vout.pos = mul(vout.pos, view);
+	vout.pos = mul(vout.pos, proj);
+	vout.color = vin.color * color;
+	return vout;
+}
+)EOT");
+
+
+	// ピクセルシェーダー
+	g_pGeometoryPS = std::make_shared<PixelShader>();
+	g_pGeometoryPS->Compile(R"EOT(
+struct PS_IN {
+	float4 pos : SV_POSITION;
+	float4 color : COLOR0;
+};
+float4 main(PS_IN pin) : SV_TARGET {
+	return pin.color;
+}
+)EOT");
+
+	// 定数バッファ
+	m_pGeometoryWVP = std::make_shared<ConstantBuffer>();
+	m_pGeometoryWVP->Create(sizeof(DirectX::XMFLOAT4X4) * 3);
+	m_pGeometoryColor = std::make_shared<ConstantBuffer>();
+	m_pGeometoryColor->Create(sizeof(DirectX::XMFLOAT4));
+}
+void UninitGeometory()
+{
+	g_pGeometoryLinesMesh.reset();
+	g_pGeometoryBoxMesh.reset();
+	g_pGeometoryVS.reset();
+	g_pGeometoryPS.reset();
+	m_pGeometoryWVP.reset();
+	m_pGeometoryColor.reset();
+}
+
+void SetGeometoryVP(DirectX::XMFLOAT4X4 view, DirectX::XMFLOAT4X4 proj)
+{
+	g_mView = view;
+	g_mProj = proj;
+}
+void SetGeometoryColor(DirectX::XMFLOAT4 color)
+{
+	g_geometoryColor = color;
+}
+
+void DrawBox(DirectX::XMFLOAT3& pos, DirectX::XMFLOAT3 size, DirectX::XMFLOAT3 rot)
+{
+	DirectX::XMStoreFloat4x4(&g_geometoryWVPMat[0], DirectX::XMMatrixTranspose(
+		DirectX::XMMatrixScaling(size.x, size.y, size.z) *
+		DirectX::XMMatrixRotationX(DirectX::XMConvertToRadians(rot.x)) *
+		DirectX::XMMatrixRotationY(DirectX::XMConvertToRadians(rot.y)) *
+		DirectX::XMMatrixRotationZ(DirectX::XMConvertToRadians(rot.z)) *
+		DirectX::XMMatrixTranslation(pos.x, pos.y, pos.z)
+	));
+	m_pGeometoryWVP->Write(g_geometoryWVPMat);
+	m_pGeometoryWVP->BindVS(0);
+	m_pGeometoryColor->Write(&g_geometoryColor);
+	m_pGeometoryColor->BindVS(1);
+	g_pGeometoryVS->Bind();
+	g_pGeometoryPS->Bind();
+	g_pGeometoryBoxMesh->Draw();
+}
+
+void DrawPolygon(XMFLOAT3 pos, XMFLOAT3 size, XMFLOAT3 rot)
+{
+	XMFLOAT4X4 world, view, proj, tex;
+	XMStoreFloat4x4(&world, XMMatrixIdentity());
+	XMStoreFloat4x4(&view, XMMatrixLookAtLH(XMVectorSet(0.0f, 0.0f, -10.0f, 1.0f),
+		XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f), XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)));
+	XMStoreFloat4x4(&proj,
+		XMMatrixOrthographicLH(SCREEN_WIDTH, SCREEN_HEIGHT, 1.0f, 100.0f));
+	XMStoreFloat4x4(&tex, XMMatrixIdentity());
+	tex._44 = 0.0f;		// テクスチャ
+
+	// 拡縮
+	XMMATRIX mWorld = XMMatrixScaling(size.x, size.y, size.z);
+	// 回転
+	mWorld *= XMMatrixRotationRollPitchYaw(XMConvertToRadians(rot.x),
+		XMConvertToRadians(rot.y), XMConvertToRadians(rot.z));
+	// 移動
+	mWorld *= XMMatrixTranslation(pos.x, pos.y, pos.z);
+	// ワールド マトリックスに設定
+	XMStoreFloat4x4(&world, mWorld);
+
+	DirectX::XMStoreFloat4x4(&g_geometoryWVPMat[0], XMLoadFloat4x4(&world));
+	DirectX::XMStoreFloat4x4(&g_geometoryWVPMat[1], XMLoadFloat4x4(&view));
+	DirectX::XMStoreFloat4x4(&g_geometoryWVPMat[2], XMLoadFloat4x4(&proj));
+	m_pGeometoryWVP->Write(g_geometoryWVPMat);
+	m_pGeometoryWVP->BindVS(0);
+	g_pPolygonVS->Bind();
+	g_pGeometoryPS->Bind();
+	g_pGeometoryPolygonMesh->Draw();
+}
+
+void AddLine(const DirectX::XMFLOAT3& start, const DirectX::XMFLOAT3& end)
+{
+	if (g_geometoryLineIndex < GeometoryLineNum)
+	{
+		g_geometoryLineVtx[g_geometoryLineIndex].pos = start;
+		g_geometoryLineVtx[g_geometoryLineIndex].color = g_geometoryColor;
+		++g_geometoryLineIndex;
+		g_geometoryLineVtx[g_geometoryLineIndex].pos = end;
+		g_geometoryLineVtx[g_geometoryLineIndex].color = g_geometoryColor;
+		++g_geometoryLineIndex;
+	}
+}
+void DrawLines()
+{
+	DirectX::XMFLOAT4 color = DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	DirectX::XMStoreFloat4x4(&g_geometoryWVPMat[0], DirectX::XMMatrixIdentity());
+	m_pGeometoryWVP->Write(g_geometoryWVPMat);
+	m_pGeometoryWVP->BindVS(0);
+	m_pGeometoryColor->Write(&color);
+	m_pGeometoryColor->BindVS(1);
+	g_pGeometoryVS->Bind();
+	g_pGeometoryPS->Bind();
+	g_pGeometoryLinesMesh->Write(g_geometoryLineVtx);
+	g_pGeometoryLinesMesh->Draw();
+	g_geometoryLineIndex = 0;
+}
