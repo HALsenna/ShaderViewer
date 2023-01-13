@@ -1,2 +1,2 @@
-﻿  SettingSceneLight.cpp
-  ShaderProject.vcxproj -> C:\ClassFile\GG31\MyShaderProject\x64\Debug\ShaderProject.exe
+﻿  LINK : 前回のインクリメンタル リンクで C:\ClassFile\GG31\ShaderViewer\x64\Debug\ShaderProject.exe が見つからなかったか、ビルドされませんでした。フル リンクを行います。
+  ShaderProject.vcxproj -> C:\ClassFile\GG31\ShaderViewer\x64\Debug\ShaderProject.exe
